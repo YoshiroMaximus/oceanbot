@@ -12,22 +12,33 @@
 const MANAGE_GUILD = "32";
 const GUILD_ONLY = [0];
 
+const GUILD_TEXT_CHANNEL = 0;
+
 const commands = [
   {
     name: "setup",
-    description: "Create the opt-in roles and channels from config.json",
+    description: "Create or update the roles and opt-in channels from the config",
     default_member_permissions: MANAGE_GUILD,
     contexts: GUILD_ONLY,
   },
   {
     name: "post",
-    description: "Post or refresh the role-menu message",
+    description: "Post the role menu, or refresh it if it already exists",
     default_member_permissions: MANAGE_GUILD,
     contexts: GUILD_ONLY,
+    options: [
+      {
+        type: 7, // channel picker
+        name: "channel",
+        description: "Where to post the menu (defaults to the configured menu channel)",
+        required: false,
+        channel_types: [GUILD_TEXT_CHANNEL],
+      },
+    ],
   },
   {
     name: "ip",
-    description: "Get the Minecraft server IP",
+    description: "Get the Minecraft server address",
     contexts: GUILD_ONLY,
   },
 ];

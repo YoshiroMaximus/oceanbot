@@ -167,14 +167,15 @@ async function runSetup(env, interaction) {
   const channels = await api(env, "GET", `/guilds/${interaction.guild_id}/channels`);
   const existing = roleEntries()
     .flatMap((entry) => entry.channels ?? [])
-    .filter((name) => findTextChannel(channels, name));
+    .map((ref) => resolveChannel(channels, ref))
+    .filter(Boolean);
 
   if (existing.length > 0) {
     await editOriginal(env, interaction, {
       content:
         "⚠️ These channels already exist and /setup will **rewrite their permissions** " +
         "so only members with the matching role can see them:\n" +
-        [...new Set(existing)].map((name) => `- #${name}`).join("\n") +
+        [...new Set(existing.map((c) => c.id))].map((id) => `- <#${id}>`).join("\n") +
         "\n\nEverything else in config.json will just be created. Apply?",
       components: [
         {
@@ -214,6 +215,7 @@ async function applySetup(env, guildId, channels) {
   const created = [];
   const updated = [];
   const newRoles = [];
+  const missing = [];
   for (const entry of roleEntries()) {
     const before = roles.length;
     const role = await ensureRole(env, guildId, roles, entry.role);
@@ -225,36 +227,39 @@ async function applySetup(env, guildId, channels) {
       { id: role.id, type: 0, allow: PERM.VIEW },
       { id: env.DISCORD_APPLICATION_ID, type: 1, allow: PERM.VIEW },
     ];
-    for (const name of entry.channels ?? []) {
-      const channel = findTextChannel(channels, name);
-      if (!channel) {
-        await api(env, "POST", `/guilds/${guildId}/channels`, {
-          name,
+    for (const ref of entry.channels ?? []) {
+      const channel = resolveChannel(channels, ref);
+      if (channel) {
+        await api(env, "PATCH", `/channels/${channel.id}`, {
+          permission_overwrites: overwrites,
+        });
+        updated.push(channel.id);
+      } else if (SNOWFLAKE.test(ref)) {
+        // An id references an existing channel; never create one from it
+        missing.push(ref);
+      } else {
+        const newChannel = await api(env, "POST", `/guilds/${guildId}/channels`, {
+          name: ref,
           type: CHANNEL_TEXT,
           parent_id: category.id,
           permission_overwrites: overwrites,
         });
-        created.push(name);
-      } else {
-        await api(env, "PATCH", `/channels/${channel.id}`, {
-          permission_overwrites: overwrites,
-        });
-        updated.push(name);
+        created.push(newChannel.id);
       }
     }
   }
 
-  const menuName = menuChannelName();
-  if (!findTextChannel(channels, menuName)) {
-    await api(env, "POST", `/guilds/${guildId}/channels`, {
-      name: menuName,
+  let menuChannel = resolveChannel(channels, menuChannelName());
+  if (!menuChannel) {
+    menuChannel = await api(env, "POST", `/guilds/${guildId}/channels`, {
+      name: menuChannelName(),
       type: CHANNEL_TEXT,
       permission_overwrites: [
         { id: guildId, type: 0, deny: PERM.SEND_AND_REACT },
         { id: env.DISCORD_APPLICATION_ID, type: 1, allow: PERM.VIEW_AND_SEND },
       ],
     });
-    created.push(menuName);
+    created.push(menuChannel.id);
   }
 
   const summary = [];
@@ -262,15 +267,21 @@ async function applySetup(env, guildId, channels) {
     summary.push("Created roles: " + newRoles.map((n) => `**${n}**`).join(", "));
   }
   if (created.length) {
-    summary.push("Created: " + created.map((n) => `#${n}`).join(", "));
+    summary.push("Created: " + created.map((id) => `<#${id}>`).join(", "));
   }
   if (updated.length) {
-    summary.push("Updated permissions on: " + updated.map((n) => `#${n}`).join(", "));
+    summary.push("Updated permissions on: " + updated.map((id) => `<#${id}>`).join(", "));
+  }
+  if (missing.length) {
+    summary.push(
+      "⚠️ Couldn't find channels for these ids (check them in config.json): " +
+        missing.join(", "),
+    );
   }
   if (!summary.length) {
     summary.push("Everything already exists, nothing to do.");
   }
-  summary.push(`Now run **/post** to put the role menu in #${menuName}.`);
+  summary.push(`Now run **/post** to put the role menu in <#${menuChannel.id}>.`);
   return summary.join("\n");
 }
 
@@ -279,7 +290,10 @@ async function applySetup(env, guildId, channels) {
 async function runPost(env, interaction) {
   const guildId = interaction.guild_id;
   const channels = await api(env, "GET", `/guilds/${guildId}/channels`);
-  const menuChannel = findTextChannel(channels, menuChannelName());
+  const chosenId = interaction.data.options?.find((o) => o.name === "channel")?.value;
+  const menuChannel = chosenId
+    ? channels.find((c) => c.id === chosenId)
+    : resolveChannel(channels, menuChannelName());
   if (!menuChannel) {
     await editOriginal(env, interaction, {
       content: `I couldn't find #${menuChannelName()}. Run /setup first.`,
@@ -364,8 +378,11 @@ function parseEmoji(emoji) {
   return { name: emoji };
 }
 
-function findTextChannel(channels, name) {
-  return channels.find((c) => c.type === CHANNEL_TEXT && c.name === name);
+const SNOWFLAKE = /^[0-9]{17,20}$/;
+
+// A channel reference in config.json is either a name ("fortnite") or an id
+function resolveChannel(channels, ref) {
+  return channels.find((c) => c.type === CHANNEL_TEXT && (c.id === ref || c.name === ref));
 }
 
 async function ensureRole(env, guildId, roles, name) {

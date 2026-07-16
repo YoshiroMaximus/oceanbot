@@ -73,10 +73,16 @@ Per role entry:
 - `emoji`: shown on the button; a normal emoji, or a custom server emoji
   written as `<:name:id>` (type the emoji in Discord with a `\` in front
   to get that form)
-- `channels` (optional): private channels only this role can see; /setup
-  creates them. Omit it for notification or cosmetic roles that don't
-  unlock any channel.
+- `channels` (optional): private channels only this role can see. Each is
+  either a name (created by /setup if missing) or the **id of an existing
+  channel** like `"1241480962882273440"` (right-click the channel → Copy
+  Channel ID, with Developer Mode on). Ids are safest for channels you
+  already have: /setup will only update their permissions, never create
+  or rename anything. Omit `channels` for notification or cosmetic roles.
 - `description` (optional): shown next to the role in the menu message
+
+`menu_channel` also accepts a name or an id. `/post` takes an optional
+`channel` argument to post the menu somewhere specific.
 
 At most 25 roles get buttons (Discord's per-message limit). `ip`
 (optional) sets what `/ip` replies with.
