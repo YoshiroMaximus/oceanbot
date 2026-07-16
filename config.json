@@ -3,6 +3,10 @@
   "category": "Opt-in Channels",
   "menu_title": "🌊 Pick your channels",
   "menu_description": "Click a button to join (or leave) a channel. You can change your mind any time!",
+  "ip": {
+    "title": "⛏️ Minecraft Server",
+    "description": "**`mc.sn4k.org`**\n\nRunning the latest Paper MC update. Every Minecraft version is supported, so just connect with whatever you're on!"
+  },
   "channels": [
     { "name": "gaming", "emoji": "🎮", "label": "Gaming" },
     { "name": "music", "emoji": "🎵", "label": "Music" },

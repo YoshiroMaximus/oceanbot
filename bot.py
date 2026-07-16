@@ -1,12 +1,12 @@
-"""Oceanbot — click a button, get a channel.
+"""Oceanbot: click a button, get a channel.
 
 Members click emoji buttons on a role-menu message to opt in/out of
 channels. Each button toggles a role, and each opt-in channel is only
 visible to members holding its role.
 
 Admin commands:
-  /setup  — create the roles and private channels listed in config.json
-  /post   — post (or refresh) the role-menu message
+  /setup  - create the roles and private channels listed in config.json
+  /post   - post or refresh the role-menu message
 """
 
 import json
@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+ROLE_BUTTON_PREFIX = "oceanbot:role:"
 
 log = logging.getLogger("oceanbot")
 
@@ -31,9 +32,23 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def menu_channel_name(config: dict) -> str:
+    return config.get("menu_channel", "roles-for-channels")
+
+
+def existing_config_channels(guild: discord.Guild, config: dict) -> dict[str, discord.TextChannel]:
+    """Map config channel names to the guild channels that already exist."""
+    by_name = {channel.name: channel for channel in guild.text_channels}
+    return {
+        entry["name"]: by_name[entry["name"]]
+        for entry in config["channels"]
+        if entry["name"] in by_name
+    }
+
+
 class RoleButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"oceanbot:role:(?P<role_id>[0-9]+)",
+    template=ROLE_BUTTON_PREFIX + r"(?P<role_id>[0-9]+)",
 ):
     """A button whose custom_id embeds the role it toggles.
 
@@ -47,7 +62,7 @@ class RoleButton(
                 style=discord.ButtonStyle.secondary,
                 emoji=emoji,
                 label=label,
-                custom_id=f"oceanbot:role:{role_id}",
+                custom_id=f"{ROLE_BUTTON_PREFIX}{role_id}",
             )
         )
         self.role_id = role_id
@@ -65,7 +80,7 @@ class RoleButton(
         role = interaction.guild.get_role(self.role_id)
         if role is None:
             await interaction.response.send_message(
-                "That role no longer exists — ask an admin to re-run /setup and /post.",
+                "That role no longer exists. Ask an admin to re-run /setup and /post.",
                 ephemeral=True,
             )
             return
@@ -90,6 +105,7 @@ class Oceanbot(discord.Client):
     def __init__(self):
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
+        self.tree.on_error = self.on_command_error
 
     async def setup_hook(self) -> None:
         self.add_dynamic_items(RoleButton)
@@ -103,6 +119,17 @@ class Oceanbot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id %s)", self.user, self.user.id)
+
+    async def on_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        command = interaction.command.name if interaction.command else "unknown"
+        log.exception("Command /%s failed", command, exc_info=error)
+        message = "Something went wrong running that command. Check the bot's logs."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 client = Oceanbot()
@@ -119,20 +146,15 @@ async def ensure_role(guild: discord.Guild, name: str) -> discord.Role:
     return role
 
 
-@client.tree.command(description="Create the opt-in roles and channels from config.json")
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.guild_only()
-async def setup(interaction: discord.Interaction) -> None:
-    await interaction.response.defer(ephemeral=True)
-    config = load_config()
-    guild = interaction.guild
-
+async def apply_setup(guild: discord.Guild, config: dict) -> str:
+    """Create/update the opt-in roles and channels. Returns a summary."""
     category_name = config.get("category", "Opt-in Channels")
     category = discord.utils.get(guild.categories, name=category_name)
     if category is None:
         category = await guild.create_category(category_name, reason="Oceanbot setup")
 
-    created, existing = [], []
+    existing = existing_config_channels(guild, config)
+    created, updated = [], []
     for entry in config["channels"]:
         role = await ensure_role(guild, role_name_for(entry))
         overwrites = {
@@ -140,7 +162,7 @@ async def setup(interaction: discord.Interaction) -> None:
             role: discord.PermissionOverwrite(view_channel=True),
             guild.me: discord.PermissionOverwrite(view_channel=True),
         }
-        channel = discord.utils.get(guild.text_channels, name=entry["name"])
+        channel = existing.get(entry["name"])
         if channel is None:
             await guild.create_text_channel(
                 entry["name"],
@@ -151,13 +173,12 @@ async def setup(interaction: discord.Interaction) -> None:
             created.append(entry["name"])
         else:
             await channel.edit(overwrites=overwrites)
-            existing.append(entry["name"])
+            updated.append(entry["name"])
 
-    menu_channel_name = config.get("menu_channel", "roles-for-channels")
-    menu_channel = discord.utils.get(guild.text_channels, name=menu_channel_name)
-    if menu_channel is None:
+    menu_name = menu_channel_name(config)
+    if discord.utils.get(guild.text_channels, name=menu_name) is None:
         await guild.create_text_channel(
-            menu_channel_name,
+            menu_name,
             overwrites={
                 guild.default_role: discord.PermissionOverwrite(
                     view_channel=True, send_messages=False, add_reactions=False
@@ -166,18 +187,94 @@ async def setup(interaction: discord.Interaction) -> None:
             },
             reason="Oceanbot setup",
         )
-        created.append(menu_channel_name)
+        created.append(menu_name)
 
     summary = []
     if created:
         summary.append("Created: " + ", ".join(f"#{name}" for name in created))
+    if updated:
+        summary.append("Updated permissions on: " + ", ".join(f"#{name}" for name in updated))
+    if not summary:
+        summary.append("Everything already exists, nothing to do.")
+    summary.append(f"Now run **/post** to put the role menu in #{menu_name}.")
+    return "\n".join(summary)
+
+
+class ConfirmSetupView(discord.ui.View):
+    """Asks for confirmation before /setup touches existing channels."""
+
+    def __init__(self, config: dict):
+        super().__init__(timeout=120)
+        self.config = config
+
+    @discord.ui.button(label="Apply changes", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.defer()
+        summary = await apply_setup(interaction.guild, self.config)
+        await interaction.edit_original_response(content=summary, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(
+            content="Cancelled, nothing was changed.", view=None
+        )
+
+
+@client.tree.command(description="Create the opt-in roles and channels from config.json")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def setup(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    config = load_config()
+    guild = interaction.guild
+
+    existing = existing_config_channels(guild, config)
     if existing:
-        summary.append("Updated permissions on: " + ", ".join(f"#{name}" for name in existing))
-    summary.append(f"Now run **/post** to put the role menu in #{menu_channel_name}.")
-    await interaction.followup.send("\n".join(summary), ephemeral=True)
+        warning = (
+            "⚠️ These channels already exist and /setup will **rewrite their permissions** "
+            "so only members with the matching role can see them:\n"
+            + "\n".join(f"- #{name}" for name in existing)
+            + "\n\nEverything else in config.json will just be created. Apply?"
+        )
+        await interaction.followup.send(warning, view=ConfirmSetupView(config), ephemeral=True)
+        return
+
+    summary = await apply_setup(guild, config)
+    await interaction.followup.send(summary, ephemeral=True)
 
 
-@client.tree.command(description="Post the role-menu message with the channel buttons")
+@client.tree.command(description="Get the Minecraft server IP")
+async def ip(interaction: discord.Interaction) -> None:
+    ip_config = load_config().get("ip", {})
+    embed = discord.Embed(
+        title=ip_config.get("title", "⛏️ Minecraft Server"),
+        description=ip_config.get("description", ""),
+        color=discord.Color.green(),
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+def is_role_menu(message: discord.Message) -> bool:
+    """The role menu is the only bot message carrying oceanbot role buttons."""
+    return any(
+        (getattr(child, "custom_id", None) or "").startswith(ROLE_BUTTON_PREFIX)
+        for row in message.components
+        for child in getattr(row, "children", [])
+    )
+
+
+async def find_menu_message(
+    channel: discord.TextChannel, bot_id: int
+) -> discord.Message | None:
+    async for message in channel.history(limit=50):
+        if message.author.id == bot_id and is_role_menu(message):
+            return message
+    return None
+
+
+@client.tree.command(description="Post or refresh the role-menu message")
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def post(interaction: discord.Interaction) -> None:
@@ -185,11 +282,11 @@ async def post(interaction: discord.Interaction) -> None:
     config = load_config()
     guild = interaction.guild
 
-    menu_channel_name = config.get("menu_channel", "roles-for-channels")
-    menu_channel = discord.utils.get(guild.text_channels, name=menu_channel_name)
+    menu_name = menu_channel_name(config)
+    menu_channel = discord.utils.get(guild.text_channels, name=menu_name)
     if menu_channel is None:
         await interaction.followup.send(
-            f"I couldn't find #{menu_channel_name} — run /setup first.", ephemeral=True
+            f"I couldn't find #{menu_name}. Run /setup first.", ephemeral=True
         )
         return
 
@@ -205,8 +302,15 @@ async def post(interaction: discord.Interaction) -> None:
         description=config.get("menu_description", "") + "\n\n" + "\n".join(lines),
         color=discord.Color.blue(),
     )
-    await menu_channel.send(embed=embed, view=view)
-    await interaction.followup.send(f"Role menu posted in {menu_channel.mention}!", ephemeral=True)
+
+    existing_menu = await find_menu_message(menu_channel, guild.me.id)
+    if existing_menu is not None:
+        await existing_menu.edit(embed=embed, view=view)
+        verb = "Updated the role menu in"
+    else:
+        await menu_channel.send(embed=embed, view=view)
+        verb = "Role menu posted in"
+    await interaction.followup.send(f"{verb} {menu_channel.mention}.", ephemeral=True)
 
 
 def main() -> None:

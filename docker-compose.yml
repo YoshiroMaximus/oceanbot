@@ -1,0 +1,9 @@
+services:
+  oceanbot:
+    build: .
+    container_name: oceanbot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # config.json lives outside the image so you can edit it without rebuilding
+      - ./config.json:/app/config.json
