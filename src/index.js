@@ -12,6 +12,8 @@
  *   /ip    - show the Minecraft server info from config.json
  */
 
+import { Buffer } from "node:buffer";
+
 import config from "../config.json";
 
 const API = "https://discord.com/api/v10";
@@ -84,22 +86,19 @@ function handleInteraction(interaction, env, ctx) {
         });
       }
       case "setup":
-        ctx.waitUntil(runSetup(env, interaction));
-        return json({ type: Reply.DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
+        return deferEphemeral(ctx, env, interaction, runSetup(env, interaction));
       case "post":
-        ctx.waitUntil(runPost(env, interaction));
-        return json({ type: Reply.DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
+        return deferEphemeral(ctx, env, interaction, runPost(env, interaction));
     }
   }
 
   if (interaction.type === InteractionType.COMPONENT) {
     const customId = interaction.data.custom_id;
     if (customId.startsWith(ROLE_BUTTON_PREFIX)) {
-      ctx.waitUntil(toggleRole(env, interaction));
-      return json({ type: Reply.DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
+      return deferEphemeral(ctx, env, interaction, toggleRole(env, interaction));
     }
     if (customId === SETUP_CONFIRM_ID) {
-      ctx.waitUntil(confirmSetup(env, interaction));
+      ctx.waitUntil(reported(env, interaction, applyAndReport(env, interaction)));
       return json({ type: Reply.DEFERRED_UPDATE });
     }
     if (customId === SETUP_CANCEL_ID) {
@@ -114,6 +113,16 @@ function handleInteraction(interaction, env, ctx) {
     type: Reply.MESSAGE,
     data: { content: "I don't know that interaction.", flags: EPHEMERAL },
   });
+}
+
+// Failures in deferred work must reach the user, not vanish inside waitUntil
+function reported(env, interaction, work) {
+  return work.catch((err) => reportError(env, interaction, err));
+}
+
+function deferEphemeral(ctx, env, interaction, work) {
+  ctx.waitUntil(reported(env, interaction, work));
+  return json({ type: Reply.DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
 }
 
 // ---------- button click: toggle the role ----------
@@ -143,73 +152,61 @@ async function toggleRole(env, interaction) {
     }
     await editOriginal(env, interaction, { content });
   } catch (err) {
-    if (String(err).includes("403")) {
-      await editOriginal(env, interaction, {
-        content:
-          "I don't have permission to manage that role. An admin should move my role " +
-          "above the opt-in roles in Server Settings → Roles.",
-      });
-      return;
-    }
-    await reportError(env, interaction, err);
+    if (err.status !== 403) throw err;
+    await editOriginal(env, interaction, {
+      content:
+        "I don't have permission to manage that role. An admin should move my role " +
+        "above the opt-in roles in Server Settings → Roles.",
+    });
   }
 }
 
 // ---------- /setup ----------
 
 async function runSetup(env, interaction) {
-  try {
-    const channels = await api(env, "GET", `/guilds/${interaction.guild_id}/channels`);
-    const existing = config.channels
-      .map((entry) => entry.name)
-      .filter((name) => findTextChannel(channels, name));
+  const channels = await api(env, "GET", `/guilds/${interaction.guild_id}/channels`);
+  const existing = config.channels
+    .map((entry) => entry.name)
+    .filter((name) => findTextChannel(channels, name));
 
-    if (existing.length > 0) {
-      await editOriginal(env, interaction, {
-        content:
-          "⚠️ These channels already exist and /setup will **rewrite their permissions** " +
-          "so only members with the matching role can see them:\n" +
-          existing.map((name) => `- #${name}`).join("\n") +
-          "\n\nEverything else in config.json will just be created. Apply?",
-        components: [
-          {
-            type: 1,
-            components: [
-              { type: 2, style: 4, label: "Apply changes", custom_id: SETUP_CONFIRM_ID },
-              { type: 2, style: 2, label: "Cancel", custom_id: SETUP_CANCEL_ID },
-            ],
-          },
-        ],
-      });
-      return;
-    }
-
-    const summary = await applySetup(env, interaction.guild_id);
-    await editOriginal(env, interaction, { content: summary, components: [] });
-  } catch (err) {
-    await reportError(env, interaction, err);
+  if (existing.length > 0) {
+    await editOriginal(env, interaction, {
+      content:
+        "⚠️ These channels already exist and /setup will **rewrite their permissions** " +
+        "so only members with the matching role can see them:\n" +
+        existing.map((name) => `- #${name}`).join("\n") +
+        "\n\nEverything else in config.json will just be created. Apply?",
+      components: [
+        {
+          type: 1,
+          components: [
+            { type: 2, style: 4, label: "Apply changes", custom_id: SETUP_CONFIRM_ID },
+            { type: 2, style: 2, label: "Cancel", custom_id: SETUP_CANCEL_ID },
+          ],
+        },
+      ],
+    });
+    return;
   }
+
+  await applyAndReport(env, interaction, channels);
 }
 
-async function confirmSetup(env, interaction) {
-  try {
-    const summary = await applySetup(env, interaction.guild_id);
-    await editOriginal(env, interaction, { content: summary, components: [] });
-  } catch (err) {
-    await reportError(env, interaction, err);
-  }
+async function applyAndReport(env, interaction, channels) {
+  const summary = await applySetup(env, interaction.guild_id, channels);
+  await editOriginal(env, interaction, { content: summary, components: [] });
 }
 
-async function applySetup(env, guildId) {
-  const channels = await api(env, "GET", `/guilds/${guildId}/channels`);
+async function applySetup(env, guildId, channels) {
+  // The confirm button arrives as a later request, so it re-fetches
+  channels = channels ?? (await api(env, "GET", `/guilds/${guildId}/channels`));
   const roles = await api(env, "GET", `/guilds/${guildId}/roles`);
 
-  let category = channels.find(
-    (c) => c.type === CHANNEL_CATEGORY && c.name === (config.category ?? "Opt-in Channels"),
-  );
+  const categoryName = config.category ?? "Opt-in Channels";
+  let category = channels.find((c) => c.type === CHANNEL_CATEGORY && c.name === categoryName);
   if (!category) {
     category = await api(env, "POST", `/guilds/${guildId}/channels`, {
-      name: config.category ?? "Opt-in Channels",
+      name: categoryName,
       type: CHANNEL_CATEGORY,
     });
   }
@@ -270,66 +267,52 @@ async function applySetup(env, guildId) {
 // ---------- /post ----------
 
 async function runPost(env, interaction) {
-  try {
-    const guildId = interaction.guild_id;
-    const channels = await api(env, "GET", `/guilds/${guildId}/channels`);
-    const menuChannel = findTextChannel(channels, menuChannelName());
-    if (!menuChannel) {
-      await editOriginal(env, interaction, {
-        content: `I couldn't find #${menuChannelName()}. Run /setup first.`,
-      });
-      return;
-    }
-
-    const roles = await api(env, "GET", `/guilds/${guildId}/roles`);
-    const buttons = [];
-    const lines = [];
-    // Discord allows at most 25 buttons per message (5 rows of 5)
-    for (const entry of config.channels.slice(0, 25)) {
-      const role = await ensureRole(env, guildId, roles, roleNameFor(entry));
-      buttons.push({
-        type: 2,
-        style: 2,
-        label: entry.label,
-        emoji: entry.emoji ? { name: entry.emoji } : undefined,
-        custom_id: `${ROLE_BUTTON_PREFIX}${role.id}`,
-      });
-      lines.push(`${entry.emoji ?? "•"} **${roleNameFor(entry)}** → #${entry.name}`);
-    }
-
-    const rows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-      rows.push({ type: 1, components: buttons.slice(i, i + 5) });
-    }
-    const embed = {
-      title: config.menu_title ?? "🌊 Pick your channels",
-      description: `${config.menu_description ?? ""}\n\n${lines.join("\n")}`,
-      color: 0x3498db,
-    };
-
-    const messages = await api(env, "GET", `/channels/${menuChannel.id}/messages?limit=50`);
-    const existingMenu = messages.find(
-      (m) => m.author.id === env.DISCORD_APPLICATION_ID && isRoleMenu(m),
-    );
-
-    let verb;
-    if (existingMenu) {
-      await api(env, "PATCH", `/channels/${menuChannel.id}/messages/${existingMenu.id}`, {
-        embeds: [embed],
-        components: rows,
-      });
-      verb = "Updated the role menu in";
-    } else {
-      await api(env, "POST", `/channels/${menuChannel.id}/messages`, {
-        embeds: [embed],
-        components: rows,
-      });
-      verb = "Role menu posted in";
-    }
-    await editOriginal(env, interaction, { content: `${verb} <#${menuChannel.id}>.` });
-  } catch (err) {
-    await reportError(env, interaction, err);
+  const guildId = interaction.guild_id;
+  const channels = await api(env, "GET", `/guilds/${guildId}/channels`);
+  const menuChannel = findTextChannel(channels, menuChannelName());
+  if (!menuChannel) {
+    await editOriginal(env, interaction, {
+      content: `I couldn't find #${menuChannelName()}. Run /setup first.`,
+    });
+    return;
   }
+
+  const roles = await api(env, "GET", `/guilds/${guildId}/roles`);
+  const buttons = [];
+  const lines = [];
+  // Discord allows at most 25 buttons per message (5 rows of 5)
+  for (const entry of config.channels.slice(0, 25)) {
+    const role = await ensureRole(env, guildId, roles, roleNameFor(entry));
+    buttons.push({
+      type: 2,
+      style: 2,
+      label: entry.label,
+      emoji: entry.emoji ? { name: entry.emoji } : undefined,
+      custom_id: `${ROLE_BUTTON_PREFIX}${role.id}`,
+    });
+    lines.push(`${entry.emoji ?? "•"} **${roleNameFor(entry)}** → #${entry.name}`);
+  }
+
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push({ type: 1, components: buttons.slice(i, i + 5) });
+  }
+  const embed = {
+    title: config.menu_title ?? "🌊 Pick your channels",
+    description: `${config.menu_description ?? ""}\n\n${lines.join("\n")}`,
+    color: 0x3498db,
+  };
+
+  const messages = await api(env, "GET", `/channels/${menuChannel.id}/messages?limit=50`);
+  const existingMenu = messages.find(
+    (m) => m.author.id === env.DISCORD_APPLICATION_ID && isRoleMenu(m),
+  );
+
+  const [method, path, verb] = existingMenu
+    ? ["PATCH", `/channels/${menuChannel.id}/messages/${existingMenu.id}`, "Updated the role menu in"]
+    : ["POST", `/channels/${menuChannel.id}/messages`, "Role menu posted in"];
+  await api(env, method, path, { embeds: [embed], components: rows });
+  await editOriginal(env, interaction, { content: `${verb} <#${menuChannel.id}>.` });
 }
 
 // The role menu is the only bot message carrying oceanbot role buttons
@@ -368,6 +351,13 @@ async function ensureRole(env, guildId, roles, name) {
   return role;
 }
 
+class DiscordApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function api(env, method, path, body) {
   const response = await fetch(`${API}${path}`, {
     method,
@@ -378,7 +368,10 @@ async function api(env, method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`${method} ${path} failed: ${response.status} ${await response.text()}`);
+    throw new DiscordApiError(
+      response.status,
+      `${method} ${path} failed: ${response.status} ${await response.text()}`,
+    );
   }
   return response.status === 204 ? null : response.json();
 }
@@ -406,30 +399,30 @@ async function reportError(env, interaction, err) {
   });
 }
 
+// The public key never changes, so import it once per isolate, not per request
+const encoder = new TextEncoder();
+let cachedKey;
+let cachedKeyHex;
+
 async function verifySignature(publicKey, signature, timestamp, body) {
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      hexToBytes(publicKey),
-      { name: "Ed25519" },
-      false,
-      ["verify"],
-    );
+    if (cachedKeyHex !== publicKey) {
+      cachedKey = await crypto.subtle.importKey(
+        "raw",
+        Buffer.from(publicKey, "hex"),
+        { name: "Ed25519" },
+        false,
+        ["verify"],
+      );
+      cachedKeyHex = publicKey;
+    }
     return await crypto.subtle.verify(
       "Ed25519",
-      key,
-      hexToBytes(signature),
-      new TextEncoder().encode(timestamp + body),
+      cachedKey,
+      Buffer.from(signature, "hex"),
+      encoder.encode(timestamp + body),
     );
   } catch {
     return false;
   }
-}
-
-function hexToBytes(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
