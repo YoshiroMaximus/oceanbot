@@ -98,6 +98,11 @@ channels.
 - **Code changes:** `npm run deploy`.
 - **Command changes** (names, descriptions, permissions): `npm run register`.
 
+## Legal
+
+- [Terms of Service](TERMS_OF_SERVICE.md)
+- [Privacy Policy](PRIVACY_POLICY.md)
+
 ## Local development
 
 `npm run dev` starts the Worker locally on `http://localhost:8787`.
