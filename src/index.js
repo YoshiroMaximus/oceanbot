@@ -438,9 +438,13 @@ function parseEmoji(emoji) {
 
 const SNOWFLAKE = /^[0-9]{17,20}$/;
 
-// A channel reference in config.json is either a name ("fortnite") or an id
+// A channel reference in config.json is either a name ("fortnite") or an id.
+// Ids match any channel type (text, voice, category); names match text only.
 function resolveChannel(channels, ref) {
-  return channels.find((c) => c.type === CHANNEL_TEXT && (c.id === ref || c.name === ref));
+  if (SNOWFLAKE.test(ref)) {
+    return channels.find((c) => c.id === ref);
+  }
+  return channels.find((c) => c.type === CHANNEL_TEXT && c.name === ref);
 }
 
 async function ensureRole(env, guildId, roles, name) {
