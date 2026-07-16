@@ -56,29 +56,38 @@ Buttons keep working across bot restarts (no database needed).
 
 ## Hosting on Unraid (24/7)
 
-1. Copy this whole folder to your Unraid server, e.g. into `appdata`:
-   over SMB to `\\TOWER\appdata\oceanbot`, or with
-   `scp -r oceanbot root@TOWER:/mnt/user/appdata/`.
-2. Make sure the folder contains a `.env` with your `DISCORD_TOKEN`
-   (and `GUILD_ID`). Copy `.env.example` if you haven't made one.
-3. Open the Unraid web terminal (the `>_` icon, top right) and run:
+Every push to `main` publishes a ready-made image to GitHub Container
+Registry, so Unraid can run the bot without the source code.
 
-   ```sh
-   cd /mnt/user/appdata/oceanbot
-   docker compose up -d --build
-   ```
+1. Put your `config.json` on the server, e.g. at
+   `/mnt/user/appdata/oceanbot/config.json` (copy it over SMB to
+   `\\TOWER\appdata\oceanbot\`).
+2. In the Unraid web UI: **Docker** tab → **Add Container**, then:
+   - **Name:** `oceanbot`
+   - **Repository:** `ghcr.io/yoshiromaximus/oceanbot:latest`
+   - Add a **Variable**: key `DISCORD_TOKEN`, value = your bot token
+   - Add a **Variable**: key `GUILD_ID`, value = your server ID
+   - Add a **Path**: container path `/app/config.json`, host path
+     `/mnt/user/appdata/oceanbot/config.json`
+3. Hit **Apply**. Unraid pulls the image and starts the bot; it
+   auto-starts with the server from then on.
 
-That's it. `restart: unless-stopped` means the bot survives crashes and
-server reboots. Useful commands, all from that same folder:
+Updating: push to `main`, wait for the
+[build action](https://github.com/YoshiroMaximus/oceanbot/actions) to
+finish, then in Unraid's Docker tab hit **force update** on the
+container (or use the Auto Update plugin). After editing `config.json`,
+just restart the container.
 
-- `docker logs -f oceanbot` to watch the logs
-- `docker compose up -d --build` again after changing `bot.py`
-- `docker restart oceanbot` after changing `config.json` (it's mounted
-  into the container, no rebuild needed)
-- `docker compose down` to stop it
+### Alternative: build from source with compose
 
-The container also shows up in Unraid's **Docker** tab, where you can
-start/stop it and read logs from the web UI.
+If you'd rather not use the registry, copy this whole folder to
+`/mnt/user/appdata/oceanbot` with a `.env` file in it, then from the
+Unraid terminal:
+
+```sh
+cd /mnt/user/appdata/oceanbot
+docker compose up -d --build
+```
 
 ## Changing the menu later
 
