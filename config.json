@@ -1,0 +1,12 @@
+{
+  "menu_channel": "roles-for-channels",
+  "category": "Opt-in Channels",
+  "menu_title": "🌊 Pick your channels",
+  "menu_description": "Click a button to join (or leave) a channel. You can change your mind any time!",
+  "channels": [
+    { "name": "gaming", "emoji": "🎮", "label": "Gaming" },
+    { "name": "music", "emoji": "🎵", "label": "Music" },
+    { "name": "movies-and-tv", "emoji": "🎬", "label": "Movies & TV" },
+    { "name": "food", "emoji": "🍜", "label": "Food" }
+  ]
+}
