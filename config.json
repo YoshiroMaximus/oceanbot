@@ -1,16 +1,53 @@
 {
   "menu_channel": "roles-for-channels",
+  "menu_title": "🌊 Pick your roles",
+  "menu_description": "Hey everyone! Click the respective button at the bottom of this post to add (or remove) a role. Here's an overview of the available roles:",
   "category": "Opt-in Channels",
-  "menu_title": "🌊 Pick your channels",
-  "menu_description": "Click a button to join (or leave) a channel. You can change your mind any time!",
   "ip": {
     "title": "⛏️ Minecraft Server",
     "description": "**`mc.sn4k.org`**\n\nRunning the latest Paper MC update. Every Minecraft version is supported, so just connect with whatever you're on!"
   },
-  "channels": [
-    { "name": "gaming", "emoji": "🎮", "label": "Gaming" },
-    { "name": "music", "emoji": "🎵", "label": "Music" },
-    { "name": "movies-and-tv", "emoji": "🎬", "label": "Movies & TV" },
-    { "name": "food", "emoji": "🍜", "label": "Food" }
+  "sections": [
+    {
+      "title": "Notifications",
+      "roles": [
+        {
+          "role": "Announcement Subscriber",
+          "emoji": "📣",
+          "description": "If you want to be pinged when we post an announcement"
+        },
+        {
+          "role": "Exclusive Content Subscriber",
+          "emoji": "🤩",
+          "description": "If you want to be pinged when we post new free goodies"
+        }
+      ]
+    },
+    {
+      "title": "Channel",
+      "roles": [
+        {
+          "role": "Fortnite",
+          "emoji": "🔫",
+          "channels": ["fortnite"],
+          "description": "If you want access to fortnite channels"
+        },
+        {
+          "role": "Popcat",
+          "emoji": "🐱",
+          "channels": ["roblox"],
+          "description": "If you want access to roblox channels"
+        }
+      ]
+    },
+    {
+      "title": "Cosmetic",
+      "roles": [
+        { "role": "Playstation", "emoji": "🔵", "description": "If you play on PS" },
+        { "role": "Switch", "emoji": "🔴", "description": "If you play on Switch" },
+        { "role": "Xbox", "emoji": "🟢", "description": "If you play on Xbox" },
+        { "role": "PC", "emoji": "🖥️", "description": "If you play on PC" }
+      ]
+    }
   ]
 }

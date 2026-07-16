@@ -32,29 +32,54 @@ is no server to keep online and nothing to restart.
 
 ### 2. Configure
 
-Everything user-facing lives in `config.json`:
+Everything user-facing lives in `config.json`. The menu is organized into
+sections, and each entry is a role that members can give themselves:
 
 ```json
 {
   "menu_channel": "roles-for-channels",
   "category": "Opt-in Channels",
-  "menu_title": "🌊 Pick your channels",
-  "menu_description": "Click a button to join (or leave) a channel.",
+  "menu_title": "🌊 Pick your roles",
+  "menu_description": "Click a button below to add or remove a role.",
   "ip": {
     "title": "⛏️ Minecraft Server",
     "description": "**`mc.sn4k.org`**"
   },
-  "channels": [
-    { "name": "gaming", "emoji": "🎮", "label": "Gaming" }
+  "sections": [
+    {
+      "title": "Channel",
+      "roles": [
+        {
+          "role": "Fortnite",
+          "emoji": "🔫",
+          "channels": ["fortnite"],
+          "description": "If you want access to fortnite channels"
+        }
+      ]
+    },
+    {
+      "title": "Cosmetic",
+      "roles": [
+        { "role": "PC", "emoji": "🖥️", "description": "If you play on PC" }
+      ]
+    }
   ]
 }
 ```
 
-- `channels`: one entry per opt-in channel. `name` is the channel,
-  `emoji` + `label` are the button (the label doubles as the role name).
-  Up to 25 per menu (Discord's button limit).
-- `menu_channel`: where the menu gets posted.
-- `ip` (optional): the title and text `/ip` replies with.
+Per role entry:
+
+- `role`: the role name (created by /setup if it doesn't exist, reused if it does)
+- `emoji`: shown on the button; a normal emoji, or a custom server emoji
+  written as `<:name:id>` (type the emoji in Discord with a `\` in front
+  to get that form)
+- `channels` (optional): private channels only this role can see; /setup
+  creates them. Omit it for notification or cosmetic roles that don't
+  unlock any channel.
+- `description` (optional): shown next to the role in the menu message
+
+At most 25 roles get buttons (Discord's per-message limit). `ip`
+(optional) sets what `/ip` replies with.
 
 ### 3. Deploy to Cloudflare
 

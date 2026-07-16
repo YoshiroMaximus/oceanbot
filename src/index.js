@@ -165,8 +165,8 @@ async function toggleRole(env, interaction) {
 
 async function runSetup(env, interaction) {
   const channels = await api(env, "GET", `/guilds/${interaction.guild_id}/channels`);
-  const existing = config.channels
-    .map((entry) => entry.name)
+  const existing = roleEntries()
+    .flatMap((entry) => entry.channels ?? [])
     .filter((name) => findTextChannel(channels, name));
 
   if (existing.length > 0) {
@@ -174,7 +174,7 @@ async function runSetup(env, interaction) {
       content:
         "⚠️ These channels already exist and /setup will **rewrite their permissions** " +
         "so only members with the matching role can see them:\n" +
-        existing.map((name) => `- #${name}`).join("\n") +
+        [...new Set(existing)].map((name) => `- #${name}`).join("\n") +
         "\n\nEverything else in config.json will just be created. Apply?",
       components: [
         {
@@ -213,27 +213,34 @@ async function applySetup(env, guildId, channels) {
 
   const created = [];
   const updated = [];
-  for (const entry of config.channels) {
-    const role = await ensureRole(env, guildId, roles, roleNameFor(entry));
+  const newRoles = [];
+  for (const entry of roleEntries()) {
+    const before = roles.length;
+    const role = await ensureRole(env, guildId, roles, entry.role);
+    if (roles.length > before) {
+      newRoles.push(entry.role);
+    }
     const overwrites = [
       { id: guildId, type: 0, deny: PERM.VIEW }, // @everyone (its role id is the guild id)
       { id: role.id, type: 0, allow: PERM.VIEW },
       { id: env.DISCORD_APPLICATION_ID, type: 1, allow: PERM.VIEW },
     ];
-    const channel = findTextChannel(channels, entry.name);
-    if (!channel) {
-      await api(env, "POST", `/guilds/${guildId}/channels`, {
-        name: entry.name,
-        type: CHANNEL_TEXT,
-        parent_id: category.id,
-        permission_overwrites: overwrites,
-      });
-      created.push(entry.name);
-    } else {
-      await api(env, "PATCH", `/channels/${channel.id}`, {
-        permission_overwrites: overwrites,
-      });
-      updated.push(entry.name);
+    for (const name of entry.channels ?? []) {
+      const channel = findTextChannel(channels, name);
+      if (!channel) {
+        await api(env, "POST", `/guilds/${guildId}/channels`, {
+          name,
+          type: CHANNEL_TEXT,
+          parent_id: category.id,
+          permission_overwrites: overwrites,
+        });
+        created.push(name);
+      } else {
+        await api(env, "PATCH", `/channels/${channel.id}`, {
+          permission_overwrites: overwrites,
+        });
+        updated.push(name);
+      }
     }
   }
 
@@ -251,6 +258,9 @@ async function applySetup(env, guildId, channels) {
   }
 
   const summary = [];
+  if (newRoles.length) {
+    summary.push("Created roles: " + newRoles.map((n) => `**${n}**`).join(", "));
+  }
   if (created.length) {
     summary.push("Created: " + created.map((n) => `#${n}`).join(", "));
   }
@@ -280,17 +290,23 @@ async function runPost(env, interaction) {
   const roles = await api(env, "GET", `/guilds/${guildId}/roles`);
   const buttons = [];
   const lines = [];
-  // Discord allows at most 25 buttons per message (5 rows of 5)
-  for (const entry of config.channels.slice(0, 25)) {
-    const role = await ensureRole(env, guildId, roles, roleNameFor(entry));
-    buttons.push({
-      type: 2,
-      style: 2,
-      label: entry.label,
-      emoji: entry.emoji ? { name: entry.emoji } : undefined,
-      custom_id: `${ROLE_BUTTON_PREFIX}${role.id}`,
-    });
-    lines.push(`${entry.emoji ?? "•"} **${roleNameFor(entry)}** → #${entry.name}`);
+  for (const section of config.sections) {
+    lines.push("", `**${section.title}:**`);
+    for (const entry of section.roles) {
+      const role = await ensureRole(env, guildId, roles, entry.role);
+      // Discord allows at most 25 buttons per message (5 rows of 5)
+      if (buttons.length < 25) {
+        buttons.push({
+          type: 2,
+          style: 2,
+          label: entry.role,
+          emoji: parseEmoji(entry.emoji),
+          custom_id: `${ROLE_BUTTON_PREFIX}${role.id}`,
+        });
+      }
+      const dash = entry.description ? ` - ${entry.description}` : "";
+      lines.push(`${entry.emoji ?? "•"} <@&${role.id}>${dash}`);
+    }
   }
 
   const rows = [];
@@ -298,8 +314,8 @@ async function runPost(env, interaction) {
     rows.push({ type: 1, components: buttons.slice(i, i + 5) });
   }
   const embed = {
-    title: config.menu_title ?? "🌊 Pick your channels",
-    description: `${config.menu_description ?? ""}\n\n${lines.join("\n")}`,
+    title: config.menu_title ?? "🌊 Pick your roles",
+    description: `${config.menu_description ?? ""}\n${lines.join("\n")}`,
     color: 0x3498db,
   };
 
@@ -334,8 +350,18 @@ function menuChannelName() {
   return config.menu_channel ?? "roles-for-channels";
 }
 
-function roleNameFor(entry) {
-  return entry.label ?? entry.name;
+function roleEntries() {
+  return config.sections.flatMap((section) => section.roles);
+}
+
+// Accepts a unicode emoji ("🎮") or a custom server emoji ("<:popcat:123456>")
+function parseEmoji(emoji) {
+  if (!emoji) return undefined;
+  const custom = emoji.match(/^<(a?):(\w+):([0-9]+)>$/);
+  if (custom) {
+    return { name: custom[2], id: custom[3], animated: custom[1] === "a" };
+  }
+  return { name: emoji };
 }
 
 function findTextChannel(channels, name) {
