@@ -37,6 +37,11 @@ const commands = [
     ],
   },
   {
+    name: "stats",
+    description: "See how many members picked each role",
+    contexts: GUILD_ONLY,
+  },
+  {
     name: "ip",
     description: "Get the Minecraft server address",
     contexts: GUILD_ONLY,

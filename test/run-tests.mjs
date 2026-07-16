@@ -60,7 +60,7 @@ async function runTests() {
   );
 
   const member = { user: { id: "2" }, roles: [] };
-  for (const name of ["setup", "post"]) {
+  for (const name of ["setup", "post", "stats"]) {
     const res = await send({ type: 2, guild_id: "1", member, token: "t", data: { name } });
     const resBody = JSON.parse(res.body);
     check(

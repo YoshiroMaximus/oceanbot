@@ -89,6 +89,8 @@ function handleInteraction(interaction, env, ctx) {
         return deferEphemeral(ctx, env, interaction, runSetup(env, interaction));
       case "post":
         return deferEphemeral(ctx, env, interaction, runPost(env, interaction));
+      case "stats":
+        return deferEphemeral(ctx, env, interaction, runStats(env, interaction));
     }
   }
 
@@ -343,6 +345,62 @@ async function runPost(env, interaction) {
     : ["POST", `/channels/${menuChannel.id}/messages`, "Role menu posted in"];
   await api(env, method, path, { embeds: [embed], components: rows });
   await editOriginal(env, interaction, { content: `${verb} <#${menuChannel.id}>.` });
+}
+
+// ---------- /stats ----------
+
+async function runStats(env, interaction) {
+  const guildId = interaction.guild_id;
+  const roles = await api(env, "GET", `/guilds/${guildId}/roles`);
+
+  // Count each role across all members (paginated, 1000 per page)
+  const counts = new Map();
+  let after = "0";
+  let total = 0;
+  while (true) {
+    let page;
+    try {
+      page = await api(env, "GET", `/guilds/${guildId}/members?limit=1000&after=${after}`);
+    } catch (err) {
+      if (err.status === 403) {
+        await editOriginal(env, interaction, {
+          content:
+            "I'm not allowed to list members yet. In the Developer Portal, open the " +
+            "app's **Bot** tab and turn on **Server Members Intent**, then try again.",
+        });
+        return;
+      }
+      throw err;
+    }
+    total += page.length;
+    for (const member of page) {
+      for (const roleId of member.roles) {
+        counts.set(roleId, (counts.get(roleId) ?? 0) + 1);
+      }
+    }
+    if (page.length < 1000) break;
+    after = page[page.length - 1].user.id;
+  }
+
+  const lines = [];
+  for (const section of config.sections) {
+    lines.push("", `**${section.title}:**`);
+    for (const entry of section.roles) {
+      const role = roles.find((r) => r.name === entry.role);
+      const count = role ? (counts.get(role.id) ?? 0) : 0;
+      lines.push(`${entry.emoji ?? "•"} ${role ? `<@&${role.id}>` : `**${entry.role}**`}: ${count}`);
+    }
+  }
+
+  await editOriginal(env, interaction, {
+    embeds: [
+      {
+        title: "📊 Role picks",
+        description: `Out of **${total}** members:\n${lines.join("\n")}`,
+        color: 0x3498db,
+      },
+    ],
+  });
 }
 
 // The role menu is the only bot message carrying oceanbot role buttons

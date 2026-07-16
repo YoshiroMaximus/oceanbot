@@ -18,6 +18,7 @@ is no server to keep online and nothing to restart.
 | -------- | -------- | --------------------------------------------------------------------- |
 | `/setup` | Admins   | Creates the roles, private channels, and menu channel from `config.json`. Asks before touching existing channels. |
 | `/post`  | Admins   | Posts the button menu, or updates it in place if it already exists.   |
+| `/stats` | Everyone | Shows how many members picked each role. Needs **Server Members Intent** turned on (app's Bot tab in the Developer Portal). |
 | `/ip`    | Everyone | Replies with the Minecraft server info from `config.json`.            |
 
 ## Setup
