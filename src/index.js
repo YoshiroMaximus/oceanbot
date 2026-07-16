@@ -359,21 +359,29 @@ class DiscordApiError extends Error {
 }
 
 async function api(env, method, path, body) {
-  const response = await fetch(`${API}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bot ${env.DISCORD_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new DiscordApiError(
-      response.status,
-      `${method} ${path} failed: ${response.status} ${await response.text()}`,
-    );
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${API}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bot ${env.DISCORD_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (response.status === 429 && attempt < 2) {
+      const data = await response.json().catch(() => ({}));
+      const waitMs = Math.min((data.retry_after ?? 1) * 1000, 10_000);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      continue;
+    }
+    if (!response.ok) {
+      throw new DiscordApiError(
+        response.status,
+        `${method} ${path} failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    return response.status === 204 ? null : response.json();
   }
-  return response.status === 204 ? null : response.json();
 }
 
 // Edit the deferred ephemeral reply (or the message the button lives on)

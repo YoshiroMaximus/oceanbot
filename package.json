@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "register": "node --env-file=.env register.js"
+    "register": "node --env-file=.env register.js",
+    "test": "node test/run-tests.mjs"
   },
   "devDependencies": {
     "wrangler": "^4"

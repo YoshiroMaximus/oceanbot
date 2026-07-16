@@ -10,8 +10,8 @@
   "vars": {
     // Both values are on your app's "General Information" page at
     // https://discord.com/developers/applications (they are not secrets).
-    "DISCORD_APPLICATION_ID": "fill-me-in",
-    "DISCORD_PUBLIC_KEY": "fill-me-in"
+    "DISCORD_APPLICATION_ID": "1527170377665740920",
+    "DISCORD_PUBLIC_KEY": "8745e5c649821c6eb0c25cea1e33d4a4fa02657204e49e65bbfd3f1170ed02d7"
   }
   // The bot token IS a secret. Set it with: npx wrangler secret put DISCORD_TOKEN
 }
