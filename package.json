@@ -1,0 +1,13 @@
+{
+  "name": "oceanbot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "register": "node --env-file=.env register.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
