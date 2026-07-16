@@ -2,6 +2,7 @@
 
 [![Built with Python](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/built-with/python_vector.svg)](https://www.python.org/)
 [![Available on GitHub](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/available/github_vector.svg)](https://github.com/YoshiroMaximus/oceanbot)
+![Join our Discord](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/compact/social/discord-plural_vector.svg)
 
 A Discord bot for opt-in channels. It posts a menu of emoji buttons in a
 `#roles-for-channels` channel; clicking a button toggles a role that shows
